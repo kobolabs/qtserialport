@@ -59,6 +59,8 @@
 #  define SERIALPORT_BUFFERSIZE 16384
 #endif
 
+#include <QtCore/qdebug.h>
+
 QT_BEGIN_NAMESPACE
 
 QSerialPortPrivateData::QSerialPortPrivateData(QSerialPort *q)
@@ -68,10 +70,10 @@ QSerialPortPrivateData::QSerialPortPrivateData(QSerialPort *q)
     , error(QSerialPort::NoError)
     , inputBaudRate(0)
     , outputBaudRate(0)
-    , dataBits(QSerialPort::UnknownDataBits)
-    , parity(QSerialPort::UnknownParity)
-    , stopBits(QSerialPort::UnknownStopBits)
-    , flow(QSerialPort::UnknownFlowControl)
+    , dataBits(QSerialPort::Data8)
+    , parity(QSerialPort::NoParity)
+    , stopBits(QSerialPort::OneStop)
+    , flow(QSerialPort::NoFlowControl)
     , policy(QSerialPort::IgnorePolicy)
     , settingsRestoredOnClose(true)
     , q_ptr(q)
@@ -196,7 +198,9 @@ int QSerialPortPrivateData::timeoutValue(int msecs, int elapsed)
     \value Baud38400    38400 baud.
     \value Baud57600    57600 baud.
     \value Baud115200   115200 baud.
-    \value UnknownBaud  Unknown baud.
+    \value UnknownBaud  Unknown baud. This value is obsolete. It is provided to
+                        keep old source code working. We strongly advise against
+                        using it in new code.
 
     \sa QSerialPort::baudRate
 */
@@ -210,7 +214,9 @@ int QSerialPortPrivateData::timeoutValue(int msecs, int elapsed)
     \value Data6            Six bits.
     \value Data7            Seven bits
     \value Data8            Eight bits.
-    \value UnknownDataBits  Unknown number of bits.
+    \value UnknownDataBits  Unknown number of bits. This value is obsolete. It
+                            is provided to keep old source code working. We
+                            strongly advise against using it in new code.
 
     \sa QSerialPort::dataBits
 */
@@ -220,12 +226,14 @@ int QSerialPortPrivateData::timeoutValue(int msecs, int elapsed)
 
     This enum describes the parity scheme used.
 
-    \value NoParity No parity.
-    \value EvenParity Even parity.
-    \value OddParity Odd parity.
-    \value SpaceParity Space parity.
-    \value MarkParity Mark parity.
-    \value UnknownParity Unknown parity.
+    \value NoParity         No parity.
+    \value EvenParity       Even parity.
+    \value OddParity        Odd parity.
+    \value SpaceParity      Space parity.
+    \value MarkParity       Mark parity.
+    \value UnknownParity    Unknown parity. This value is obsolete. It is
+                            provided to keep old source code working. We
+                            strongly advise against using it in new code.
 
     \sa QSerialPort::parity
 */
@@ -235,10 +243,12 @@ int QSerialPortPrivateData::timeoutValue(int msecs, int elapsed)
 
     This enum describes the number of stop bits used.
 
-    \value OneStop 1 stop bit.
-    \value OneAndHalfStop 1.5 stop bits.
-    \value TwoStop 2 stop bits.
-    \value UnknownStopBits Unknown number of stop bit.
+    \value OneStop          1 stop bit.
+    \value OneAndHalfStop   1.5 stop bits.
+    \value TwoStop          2 stop bits.
+    \value UnknownStopBits  Unknown number of stop bit. This value is obsolete.
+                            It is provided to keep old source code working. We
+                            strongly advise against using it in new code.
 
     \sa QSerialPort::stopBits
 */
@@ -248,10 +258,12 @@ int QSerialPortPrivateData::timeoutValue(int msecs, int elapsed)
 
     This enum describes the flow control used.
 
-    \value NoFlowControl No flow control.
-    \value HardwareControl Hardware flow control (RTS/CTS).
-    \value SoftwareControl Software flow control (XON/XOFF).
-    \value UnknownFlowControl Unknown flow control.
+    \value NoFlowControl        No flow control.
+    \value HardwareControl      Hardware flow control (RTS/CTS).
+    \value SoftwareControl      Software flow control (XON/XOFF).
+    \value UnknownFlowControl   Unknown flow control. This value is obsolete. It
+                                is provided to keep old source code working. We
+                                strongly advise against using it in new code.
 
     \sa QSerialPort::flowControl
 */
@@ -272,7 +284,6 @@ int QSerialPortPrivateData::timeoutValue(int msecs, int elapsed)
     \value ClearToSendSignal              CTS (Clear To Send).
     \value SecondaryTransmittedDataSignal STD (Secondary Transmitted Data).
     \value SecondaryReceivedDataSignal    SRD (Secondary Received Data).
-    \value UnknownSignal                  Unknown line state. This value was introduced in QtSerialPort 5.2.
 
     \sa pinoutSignals(), QSerialPort::dataTerminalReady,
     QSerialPort::requestToSend
@@ -280,6 +291,7 @@ int QSerialPortPrivateData::timeoutValue(int msecs, int elapsed)
 
 /*!
     \enum QSerialPort::DataErrorPolicy
+    \obsolete
 
     This enum describes the policies for the received symbols
     while parity errors were detected.
@@ -300,28 +312,47 @@ int QSerialPortPrivateData::timeoutValue(int msecs, int elapsed)
     QSerialPort::error property.
 
     \value NoError              No error occurred.
+
     \value DeviceNotFoundError  An error occurred while attempting to
                                 open an non-existing device.
+
     \value PermissionError      An error occurred while attempting to
-           open an already opened device by another process or a user not
-           having enough permission and credentials to open.
-    \value OpenError            An error occurred while attempting to
-           open an already opened device in this object.
+                                open an already opened device by another
+                                process or a user not having enough permission
+                                and credentials to open.
+
+    \value OpenError            An error occurred while attempting to open an
+                                already opened device in this object.
+
     \value NotOpenError         This error occurs when an operation is executed
                                 that can only be successfully performed if the
                                 device is open. This value was introduced in
                                 QtSerialPort 5.2.
-    \value ParityError Parity error detected by the hardware while reading data.
-    \value FramingError Framing error detected by the hardware while reading data.
-    \value BreakConditionError Break condition detected by the hardware on
-           the input line.
-    \value WriteError An I/O error occurred while writing the data.
-    \value ReadError An I/O error occurred while reading the data.
-    \value ResourceError An I/O error occurred when a resource becomes unavailable,
-           e.g. when the device is unexpectedly removed from the system.
-    \value UnsupportedOperationError The requested device operation is
-           not supported or prohibited by the running operating system.
-    \value TimeoutError         A timeout error occurred. This value was introduced in QtSerialPort 5.2.
+
+    \value ParityError          Parity error detected by the hardware while
+                                reading data.
+
+    \value FramingError         Framing error detected by the hardware while
+                                reading data.
+
+    \value BreakConditionError  Break condition detected by the hardware on
+                                the input line.
+
+    \value WriteError           An I/O error occurred while writing the data.
+
+    \value ReadError            An I/O error occurred while reading the data.
+
+    \value ResourceError        An I/O error occurred when a resource becomes
+                                unavailable, e.g. when the device is
+                                unexpectedly removed from the system.
+
+    \value UnsupportedOperationError The requested device operation is not
+                                supported or prohibited by the running operating
+                                system.
+
+    \value TimeoutError         A timeout error occurred. This value was
+                                introduced in QtSerialPort 5.2.
+
     \value UnknownError         An unidentified error occurred.
     \sa QSerialPort::error
 */
@@ -566,6 +597,7 @@ bool QSerialPort::setBaudRate(qint32 baudRate, Directions directions)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -598,7 +630,7 @@ qint32 QSerialPort::baudRate(Directions directions) const
     Q_D(const QSerialPort);
     if (directions == QSerialPort::AllDirections)
         return d->inputBaudRate == d->outputBaudRate ?
-                    d->inputBaudRate : QSerialPort::UnknownBaud;
+                    d->inputBaudRate : -1;
     return directions & QSerialPort::Input ? d->inputBaudRate : d->outputBaudRate;
 }
 
@@ -632,6 +664,7 @@ bool QSerialPort::setDataBits(DataBits dataBits)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -683,6 +716,7 @@ bool QSerialPort::setParity(Parity parity)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -733,6 +767,7 @@ bool QSerialPort::setStopBits(StopBits stopBits)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -783,6 +818,7 @@ bool QSerialPort::setFlowControl(FlowControl flow)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -834,6 +870,7 @@ bool QSerialPort::setDataTerminalReady(bool set)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -884,6 +921,7 @@ bool QSerialPort::setRequestToSend(bool set)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -924,8 +962,7 @@ bool QSerialPort::isRequestToSend()
     operating systems cannot provide proper notifications about the changes.
 
     \note The serial port has to be open before trying to get the pinout
-    signals; otherwise returns UnknownSignal and sets the NotOpenError error
-    code.
+    signals; otherwise returns NoSignal and sets the NotOpenError error code.
 
     \sa isDataTerminalReady(), isRequestToSend, setDataTerminalReady(),
     setRequestToSend()
@@ -936,7 +973,8 @@ QSerialPort::PinoutSignals QSerialPort::pinoutSignals()
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
-        return QSerialPort::UnknownSignal;
+        qWarning("%s: device not open", Q_FUNC_INFO);
+        return QSerialPort::NoSignal;
     }
 
     return d->pinoutSignals();
@@ -965,6 +1003,7 @@ bool QSerialPort::flush()
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -986,6 +1025,7 @@ bool QSerialPort::clear(Directions directions)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -1028,6 +1068,7 @@ bool QSerialPort::atEnd() const
     \property QSerialPort::dataErrorPolicy
     \brief the error policy how the process receives the character in case of
     parity error detection.
+    \obsolete
 
     If the setting is successful, returns true; otherwise returns false. The
     default policy set is IgnorePolicy.
@@ -1045,6 +1086,7 @@ bool QSerialPort::setDataErrorPolicy(DataErrorPolicy policy)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -1065,6 +1107,7 @@ QSerialPort::DataErrorPolicy QSerialPort::dataErrorPolicy() const
 
 /*!
     \fn void QSerialPort::dataErrorPolicyChanged(DataErrorPolicy policy)
+    \obsolete
 
     This signal is emitted after the error policy how the process receives the
     character in case of parity error detection has been changed. The new error
@@ -1261,6 +1304,7 @@ bool QSerialPort::sendBreak(int duration)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 
@@ -1284,6 +1328,7 @@ bool QSerialPort::setBreakEnabled(bool set)
 
     if (!isOpen()) {
         setError(QSerialPort::NotOpenError);
+        qWarning("%s: device not open", Q_FUNC_INFO);
         return false;
     }
 

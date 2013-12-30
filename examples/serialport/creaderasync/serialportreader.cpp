@@ -1,8 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2011-2012 Denis Shienkov <denis.shienkov@gmail.com>
-** Copyright (C) 2011 Sergey Belyashov <Sergey.Belyashov@gmail.com>
-** Copyright (C) 2012 Laszlo Papp <lpapp@kde.org>
+** Copyright (C) 2013 Laszlo Papp <lpapp@kde.org>
 ** Contact: http://www.qt-project.org/legal
 **
 ** This file is part of the QtSerialPort module of the Qt Toolkit.
@@ -41,44 +39,52 @@
 **
 ****************************************************************************/
 
-#ifndef QSERIALPORT_P_H
-#define QSERIALPORT_P_H
+#include "serialportreader.h"
 
-#include "qserialport.h"
+#include <QCoreApplication>
 
-#include <private/qringbuffer_p.h>
+QT_USE_NAMESPACE
 
-QT_BEGIN_NAMESPACE
-
-class QSerialPortPrivateData
+SerialPortReader::SerialPortReader(QSerialPort *serialPort, QObject *parent)
+    : QObject(parent)
+    , m_serialPort(serialPort)
+    , m_standardOutput(stdout)
 {
-public:
-    enum IoConstants {
-        ReadChunkSize = 512,
-        WriteChunkSize = 512
-    };
+    connect(m_serialPort, SIGNAL(readyRead()), SLOT(handleReadyRead()));
+    connect(m_serialPort, SIGNAL(error(QSerialPort::SerialPortError)), SLOT(handleError(QSerialPort::SerialPortError)));
+    connect(&m_timer, SIGNAL(timeout()), SLOT(handleTimeout()));
 
-    QSerialPortPrivateData(QSerialPort *q);
-    int timeoutValue(int msecs, int elapsed);
+    m_timer.start(5000);
+}
 
-    qint64 readBufferMaxSize;
-    QRingBuffer readBuffer;
-    QRingBuffer writeBuffer;
-    QSerialPort::SerialPortError error;
-    QString systemLocation;
-    qint32 inputBaudRate;
-    qint32 outputBaudRate;
-    QSerialPort::DataBits dataBits;
-    QSerialPort::Parity parity;
-    QSerialPort::StopBits stopBits;
-    QSerialPort::FlowControl flow;
-    QSerialPort::DataErrorPolicy policy;
-    bool dataTerminalReady;
-    bool requestToSend;
-    bool settingsRestoredOnClose;
-    QSerialPort * const q_ptr;
-};
+SerialPortReader::~SerialPortReader()
+{
+}
 
-QT_END_NAMESPACE
+void SerialPortReader::handleReadyRead()
+{
+    m_readData = m_serialPort->readAll();
 
-#endif // QSERIALPORT_P_H
+    if (!m_timer.isActive())
+        m_timer.start(5000);
+}
+
+void SerialPortReader::handleTimeout()
+{
+    if (m_readData.isEmpty()) {
+        m_standardOutput << QObject::tr("Either no data was currently available on the standard input for reading, or an error occurred for port %1, error: %2").arg(m_serialPort->portName()).arg(m_serialPort->errorString()) << endl;
+        QCoreApplication::exit(1);
+    } else {
+        m_standardOutput << QObject::tr("Data successfully received from port %1").arg(m_serialPort->portName()) << endl;
+        m_standardOutput << m_readData << endl;
+        QCoreApplication::quit();
+    }
+}
+
+void SerialPortReader::handleError(QSerialPort::SerialPortError serialPortError)
+{
+    if (serialPortError == QSerialPort::ReadError) {
+        m_standardOutput << QObject::tr("An I/O error occurred while reading the data from port %1, error: %2").arg(m_serialPort->portName()).arg(m_serialPort->errorString()) << endl;
+        QCoreApplication::exit(1);
+    }
+}

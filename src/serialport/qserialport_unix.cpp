@@ -42,7 +42,6 @@
 ****************************************************************************/
 
 #include "qserialport_unix_p.h"
-#include "qttylocker_unix_p.h"
 
 #include <errno.h>
 #include <sys/time.h>
@@ -62,8 +61,47 @@
 
 QT_BEGIN_NAMESPACE
 
+QString serialPortLockFilePath(const QString &portName)
+{
+    static const QStringList lockDirectoryPaths = QStringList()
+        << QStringLiteral("/var/lock")
+        << QStringLiteral("/etc/locks")
+        << QStringLiteral("/var/spool/locks")
+        << QStringLiteral("/var/spool/uucp")
+        << QStringLiteral("/tmp")
+#ifdef Q_OS_ANDROID
+        << QStringLiteral("/data/local/tmp")
+#endif
+    ;
+
+    QString lockFilePath;
+
+    foreach (const QString &lockDirectoryPath, lockDirectoryPaths) {
+        QFileInfo lockDirectoryInfo(lockDirectoryPath);
+        if (lockDirectoryInfo.isReadable() && lockDirectoryInfo.isWritable()) {
+            lockFilePath = lockDirectoryPath;
+            break;
+        }
+    }
+
+    if (lockFilePath.isEmpty()) {
+        qWarning("The following directories are not readable or writable for detaling with lock files\n");
+        foreach (const QString &lockDirectoryPath, lockDirectoryPaths)
+            qWarning("\t%s\n", qPrintable(lockDirectoryPath));
+        return QString();
+    }
+
+    QString replacedPortName = portName;
+
+    lockFilePath.append(QStringLiteral("/LCK.."));
+    lockFilePath.append(replacedPortName.replace(QLatin1Char('/'), QLatin1Char('_')));
+
+    return lockFilePath;
+}
+
 class ReadNotifier : public QSocketNotifier
 {
+    Q_OBJECT
 public:
     ReadNotifier(QSerialPortPrivate *d, QObject *parent)
         : QSocketNotifier(d->descriptor, QSocketNotifier::Read, parent)
@@ -84,6 +122,7 @@ private:
 
 class WriteNotifier : public QSocketNotifier
 {
+    Q_OBJECT
 public:
     WriteNotifier(QSerialPortPrivate *d, QObject *parent)
         : QSocketNotifier(d->descriptor, QSocketNotifier::Write, parent)
@@ -104,6 +143,7 @@ private:
 
 class ExceptionNotifier : public QSocketNotifier
 {
+    Q_OBJECT
 public:
     ExceptionNotifier(QSerialPortPrivate *d, QObject *parent)
         : QSocketNotifier(d->descriptor, QSocketNotifier::Exception, parent)
@@ -121,6 +161,8 @@ protected:
 private:
     QSerialPortPrivate *dptr;
 };
+
+#include "qserialport_unix.moc"
 
 QSerialPortPrivate::QSerialPortPrivate(QSerialPort *q)
     : QSerialPortPrivateData(q)
@@ -141,11 +183,18 @@ bool QSerialPortPrivate::open(QIODevice::OpenMode mode)
 {
     Q_Q(QSerialPort);
 
-    QByteArray portName = portNameFromSystemLocation(systemLocation).toLocal8Bit();
-    const char *ptr = portName.constData();
+    QString lockFilePath = serialPortLockFilePath(portNameFromSystemLocation(systemLocation));
+    bool isLockFileEmpty = lockFilePath.isEmpty();
+    if (isLockFileEmpty) {
+        qWarning("Failed to create a lock file for opening the device");
+        q->setError(QSerialPort::PermissionError);
+        return false;
+    }
 
-    bool byCurrPid = false;
-    if (QTtyLocker::isLocked(ptr, &byCurrPid)) {
+    QScopedPointer<QLockFile> newLockFileScopedPointer(new QLockFile(lockFilePath));
+    lockFileScopedPointer.swap(newLockFileScopedPointer);
+
+    if (lockFileScopedPointer->isLocked()) {
         q->setError(QSerialPort::PermissionError);
         return false;
     }
@@ -171,8 +220,8 @@ bool QSerialPortPrivate::open(QIODevice::OpenMode mode)
         return false;
     }
 
-    QTtyLocker::lock(ptr);
-    if (!QTtyLocker::isLocked(ptr, &byCurrPid)) {
+    lockFileScopedPointer->lock();
+    if (!lockFileScopedPointer->isLocked()) {
         q->setError(QSerialPort::PermissionError);
         return false;
     }
@@ -241,12 +290,8 @@ void QSerialPortPrivate::close()
 
     ::close(descriptor);
 
-    QByteArray portName = portNameFromSystemLocation(systemLocation).toLocal8Bit();
-    const char *ptr = portName.constData();
-
-    bool byCurrPid = false;
-    if (QTtyLocker::isLocked(ptr, &byCurrPid) && byCurrPid)
-        QTtyLocker::unlock(ptr);
+    if (lockFileScopedPointer->isLocked())
+        lockFileScopedPointer->unlock();
 
     descriptor = -1;
     isCustomBaudRateSupported = false;
@@ -260,7 +305,7 @@ QSerialPort::PinoutSignals QSerialPortPrivate::pinoutSignals()
 
     if (::ioctl(descriptor, TIOCMGET, &arg) == -1) {
         q->setError(decodeSystemError());
-        return QSerialPort::UnknownSignal;
+        return QSerialPort::NoSignal;
     }
 
     QSerialPort::PinoutSignals ret = QSerialPort::NoSignal;
@@ -723,6 +768,10 @@ bool QSerialPortPrivate::readNotification()
     const qint64 readBytes = readFromPort(ptr, bytesToRead);
 
     if (readBytes <= 0) {
+        QSerialPort::SerialPortError error = decodeSystemError();
+        if (error != QSerialPort::ResourceError)
+            error = QSerialPort::ReadError;
+        q->setError(error);
         readBuffer.chop(bytesToRead);
         return false;
     }
@@ -772,10 +821,15 @@ bool QSerialPortPrivate::writeNotification(int maxSize)
 
     const char *ptr = writeBuffer.readPointer();
 
-    // Attempt to write it chunk.
+    // Attempt to write it all in one chunk.
     qint64 written = writeToPort(ptr, nextSize);
-    if (written < 0)
+    if (written < 0) {
+        QSerialPort::SerialPortError error = decodeSystemError();
+        if (error != QSerialPort::ResourceError)
+            error = QSerialPort::WriteError;
+        q->setError(error);
         return false;
+    }
 
     // Remove what we wrote so far.
     writeBuffer.free(written);
@@ -794,14 +848,12 @@ bool QSerialPortPrivate::writeNotification(int maxSize)
     return (writeBuffer.size() < tmp);
 }
 
-bool QSerialPortPrivate::exceptionNotification()
+void QSerialPortPrivate::exceptionNotification()
 {
     Q_Q(QSerialPort);
 
     QSerialPort::SerialPortError error = decodeSystemError();
     q->setError(error);
-
-    return true;
 }
 
 bool QSerialPortPrivate::updateTermios()
@@ -869,7 +921,8 @@ void QSerialPortPrivate::detectDefaultSettings()
         dataBits = QSerialPort::Data8;
         break;
     default:
-        dataBits = QSerialPort::UnknownDataBits;
+        qWarning("%s: Unexpected data bits settings", Q_FUNC_INFO);
+        dataBits = QSerialPort::Data8;
         break;
     }
 
@@ -901,8 +954,10 @@ void QSerialPortPrivate::detectDefaultSettings()
         flow = QSerialPort::SoftwareControl;
     else if ((currentTermios.c_cflag & CRTSCTS) && (!(currentTermios.c_iflag & (IXON | IXOFF | IXANY))))
         flow = QSerialPort::HardwareControl;
-    else
-        flow = QSerialPort::UnknownFlowControl;
+    else {
+        qWarning("%s: Unexpected flow control settings", Q_FUNC_INFO);
+        flow = QSerialPort::NoFlowControl;
+    }
 }
 
 QSerialPort::SerialPortError QSerialPortPrivate::decodeSystemError() const
@@ -1031,8 +1086,6 @@ bool QSerialPortPrivate::waitForReadOrWrite(bool *selectForRead, bool *selectFor
 
 qint64 QSerialPortPrivate::readFromPort(char *data, qint64 maxSize)
 {
-    Q_Q(QSerialPort);
-
     qint64 bytesRead = 0;
 #if defined (CMSPAR)
     if (parity == QSerialPort::NoParity
@@ -1046,20 +1099,11 @@ qint64 QSerialPortPrivate::readFromPort(char *data, qint64 maxSize)
         bytesRead = readPerChar(data, maxSize);
     }
 
-    if (bytesRead <= 0) {
-        QSerialPort::SerialPortError error = decodeSystemError();
-        if (error != QSerialPort::ResourceError)
-            error = QSerialPort::ReadError;
-        q->setError(error);
-    }
-
     return bytesRead;
 }
 
 qint64 QSerialPortPrivate::writeToPort(const char *data, qint64 maxSize)
 {
-    Q_Q(QSerialPort);
-
     qint64 bytesWritten = 0;
 #if defined (CMSPAR)
     bytesWritten = ::write(descriptor, data, maxSize);
@@ -1071,13 +1115,6 @@ qint64 QSerialPortPrivate::writeToPort(const char *data, qint64 maxSize)
         bytesWritten = writePerChar(data, maxSize);
     }
 #endif
-
-    if (bytesWritten < 0) {
-        QSerialPort::SerialPortError error = decodeSystemError();
-        if (error != QSerialPort::ResourceError)
-            error = QSerialPort::WriteError;
-        q->setError(error);
-    }
 
     return bytesWritten;
 }
@@ -1196,10 +1233,10 @@ qint64 QSerialPortPrivate::readPerChar(char *data, qint64 maxSize)
 }
 
 #ifdef Q_OS_MAC
-static const QLatin1String defaultFilePathPrefix("/dev/cu.");
-static const QLatin1String unusedFilePathPrefix("/dev/tty.");
+static const QString defaultFilePathPrefix = QStringLiteral("/dev/cu.");
+static const QString unusedFilePathPrefix = QStringLiteral("/dev/tty.");
 #else
-static const QLatin1String defaultFilePathPrefix("/dev/");
+static const QString defaultFilePathPrefix = QStringLiteral("/dev/");
 #endif
 
 QString QSerialPortPrivate::portNameToSystemLocation(const QString &port)

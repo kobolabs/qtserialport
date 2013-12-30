@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2012 Denis Shienkov <denis.shienkov@gmail.com>
+** Copyright (C) 2013 Laszlo Papp <lpapp@kde.org>
 ** Contact: http://www.qt-project.org/legal
 **
 ** This file is part of the QtSerialPort module of the Qt Toolkit.
@@ -39,21 +39,40 @@
 **
 ****************************************************************************/
 
-#include <QtCore/qglobal.h>
+#ifndef SERIALPORTREADER_H
+#define SERIALPORTREADER_H
 
-#ifndef TTYLOCKER_UNIX_P_H
-#define TTYLOCKER_UNIX_P_H
+#include <QtSerialPort/QSerialPort>
+
+#include <QTextStream>
+#include <QTimer>
+#include <QByteArray>
+#include <QObject>
+
+QT_USE_NAMESPACE
 
 QT_BEGIN_NAMESPACE
 
-class QTtyLocker
-{
-public:
-    static bool lock(const char *portName);
-    static bool unlock(const char *portName);
-    static bool isLocked(const char *portName, bool *currentPid);
-};
-
 QT_END_NAMESPACE
 
-#endif // TTYLOCKER_UNIX_P_H
+class SerialPortReader : public QObject
+{
+    Q_OBJECT
+
+public:
+    SerialPortReader(QSerialPort *serialPort, QObject *parent = 0);
+    ~SerialPortReader();
+
+private slots:
+    void handleReadyRead();
+    void handleTimeout();
+    void handleError(QSerialPort::SerialPortError error);
+
+private:
+    QSerialPort *m_serialPort;
+    QByteArray  m_readData;
+    QTextStream m_standardOutput;
+    QTimer      m_timer;
+};
+
+#endif

@@ -50,11 +50,8 @@
 #include <QtCore/qvector.h>
 #endif
 
-#if (QT_VERSION >= QT_VERSION_CHECK(5, 0, 0))
 #include <QtCore/qwineventnotifier.h>
-#else
-#include "qt4support/qwineventnotifier_p.h"
-#endif
+#include <algorithm>
 
 #ifndef CTL_CODE
 #  define CTL_CODE(DeviceType, Function, Method, Access) ( \
@@ -93,6 +90,7 @@ QT_BEGIN_NAMESPACE
 
 class AbstractOverlappedEventNotifier : public QWinEventNotifier
 {
+    Q_OBJECT
 public:
     enum Type { CommEvent, ReadCompletionEvent, WriteCompletionEvent };
 
@@ -108,7 +106,6 @@ public:
 
     virtual ~AbstractOverlappedEventNotifier() {
         setEnabled(false);
-        ::CancelIo(o.hEvent);
         ::CloseHandle(o.hEvent);
     }
 
@@ -130,6 +127,7 @@ protected:
 
 class CommOverlappedEventNotifier : public AbstractOverlappedEventNotifier
 {
+    Q_OBJECT
 public:
     CommOverlappedEventNotifier(QSerialPortPrivate *d, DWORD eventMask, QObject *parent)
         : AbstractOverlappedEventNotifier(d, CommEvent, false, parent)
@@ -176,6 +174,7 @@ private:
 
 class ReadOverlappedCompletionNotifier : public AbstractOverlappedEventNotifier
 {
+    Q_OBJECT
 public:
     ReadOverlappedCompletionNotifier(QSerialPortPrivate *d, QObject *parent)
         : AbstractOverlappedEventNotifier(d, ReadCompletionEvent, false, parent) {}
@@ -183,24 +182,25 @@ public:
     bool processCompletionRoutine() Q_DECL_OVERRIDE {
         DWORD numberOfBytesTransferred = 0;
         ::GetOverlappedResult(dptr->descriptor, &o, &numberOfBytesTransferred, FALSE);
-        bool ret = dptr->completeAsyncRead(numberOfBytesTransferred);
+        dptr->completeAsyncRead(numberOfBytesTransferred);
 
         // start async read for possible remainder into driver queue
-        if (ret && (numberOfBytesTransferred > 0) && (dptr->policy == QSerialPort::IgnorePolicy)) {
+        if ((numberOfBytesTransferred > 0) && (dptr->policy == QSerialPort::IgnorePolicy)) {
             dptr->startAsyncRead();
         } else { // driver queue is emplty, so startup wait comm event
             CommOverlappedEventNotifier *n =
-                    reinterpret_cast<CommOverlappedEventNotifier *>(dptr->lookupCommEventNotifier());
+                    qobject_cast<CommOverlappedEventNotifier *>(dptr->lookupCommEventNotifier());
             if (n)
                 n->startWaitCommEvent();
         }
 
-        return ret;
+        return true;
     }
 };
 
 class WriteOverlappedCompletionNotifier : public AbstractOverlappedEventNotifier
 {
+    Q_OBJECT
 public:
     WriteOverlappedCompletionNotifier(QSerialPortPrivate *d, QObject *parent)
         : AbstractOverlappedEventNotifier(d, WriteCompletionEvent, false, parent) {}
@@ -209,9 +209,12 @@ public:
         setEnabled(false);
         DWORD numberOfBytesTransferred = 0;
         ::GetOverlappedResult(dptr->descriptor, &o, &numberOfBytesTransferred, FALSE);
-        return dptr->completeAsyncWrite(numberOfBytesTransferred);
+        dptr->completeAsyncWrite(numberOfBytesTransferred);
+        return true;
     }
 };
+
+#include "qserialport_win.moc"
 
 QSerialPortPrivate::QSerialPortPrivate(QSerialPort *q)
     : QSerialPortPrivateData(q)
@@ -323,7 +326,7 @@ QSerialPort::PinoutSignals QSerialPortPrivate::pinoutSignals()
 
     if (!::GetCommModemStatus(descriptor, &modemStat)) {
         q->setError(decodeSystemError());
-        return QSerialPort::UnknownSignal;
+        return QSerialPort::NoSignal;
     }
 
     QSerialPort::PinoutSignals ret = QSerialPort::NoSignal;
@@ -725,18 +728,17 @@ bool QSerialPortPrivate::startAsyncWrite(int maxSize)
 
 #endif // #ifndef Q_OS_WINCE
 
-bool QSerialPortPrivate::processIoErrors(bool error)
+void QSerialPortPrivate::processIoErrors(bool error)
 {
     Q_Q(QSerialPort);
 
     if (error) {
         q->setError(QSerialPort::ResourceError);
-        return true;
+        return;
     }
 
     DWORD errors = 0;
-    const bool ret = ::ClearCommError(descriptor, &errors, NULL);
-    if (ret && errors) {
+    if (::ClearCommError(descriptor, &errors, NULL) && errors) {
         if (errors & CE_FRAME) {
             q->setError(QSerialPort::FramingError);
         } else if (errors & CE_RXPARITY) {
@@ -748,12 +750,11 @@ bool QSerialPortPrivate::processIoErrors(bool error)
             q->setError(QSerialPort::UnknownError);
         }
     }
-    return ret;
 }
 
 #ifndef Q_OS_WINCE
 
-bool QSerialPortPrivate::completeAsyncRead(DWORD numberOfBytes)
+void QSerialPortPrivate::completeAsyncRead(DWORD numberOfBytes)
 {
     Q_Q(QSerialPort);
 
@@ -771,14 +772,14 @@ bool QSerialPortPrivate::completeAsyncRead(DWORD numberOfBytes)
             if (policy == QSerialPort::SkipPolicy) {
                 readBuffer.getChar();
                 // Force returning without emitting a readyRead() signal
-                return true;
+                return;
             }
 
             // Abort receiving
             if (policy == QSerialPort::StopReceivingPolicy) {
                 readyReadEmitted = true;
                 emit q->readyRead();
-                return true;
+                return;
             }
 
             // Replace received character by zero
@@ -792,10 +793,9 @@ bool QSerialPortPrivate::completeAsyncRead(DWORD numberOfBytes)
         readyReadEmitted = true;
         emit q->readyRead();
     }
-    return true;
 }
 
-bool QSerialPortPrivate::completeAsyncWrite(DWORD numberOfBytes)
+void QSerialPortPrivate::completeAsyncWrite(DWORD numberOfBytes)
 {
     Q_Q(QSerialPort);
 
@@ -810,8 +810,6 @@ bool QSerialPortPrivate::completeAsyncWrite(DWORD numberOfBytes)
         writeSequenceStarted = false;
     else
         startAsyncWrite(WriteChunkSize);
-
-    return true;
 }
 
 AbstractOverlappedEventNotifier *QSerialPortPrivate::lookupFreeWriteCompletionNotifier()
@@ -892,7 +890,8 @@ void QSerialPortPrivate::detectDefaultSettings()
         dataBits = QSerialPort::Data8;
         break;
     default:
-        dataBits = QSerialPort::UnknownDataBits;
+        qWarning("%s: Unexpected data bits settings", Q_FUNC_INFO);
+        dataBits = QSerialPort::Data8;
         break;
     }
 
@@ -907,8 +906,10 @@ void QSerialPortPrivate::detectDefaultSettings()
         parity = QSerialPort::EvenParity;
     else if ((currentDcb.Parity == ODDPARITY) && currentDcb.fParity)
         parity = QSerialPort::OddParity;
-    else
-        parity = QSerialPort::UnknownParity;
+    else {
+        qWarning("%s: Unexpected parity settings", Q_FUNC_INFO);
+        parity = QSerialPort::NoParity;
+    }
 
     // Detect stopbits.
     switch (currentDcb.StopBits) {
@@ -922,7 +923,8 @@ void QSerialPortPrivate::detectDefaultSettings()
         stopBits = QSerialPort::TwoStop;
         break;
     default:
-        stopBits = QSerialPort::UnknownStopBits;
+        qWarning("%s: Unexpected stop bits settings", Q_FUNC_INFO);
+        stopBits = QSerialPort::OneStop;
         break;
     }
 
@@ -936,8 +938,10 @@ void QSerialPortPrivate::detectDefaultSettings()
     } else if (currentDcb.fOutxCtsFlow && (currentDcb.fRtsControl == RTS_CONTROL_HANDSHAKE)
                && !currentDcb.fInX && !currentDcb.fOutX) {
         flow = QSerialPort::HardwareControl;
-    } else
-        flow = QSerialPort::UnknownFlowControl;
+    } else {
+        qWarning("%s: Unexpected flow control settings", Q_FUNC_INFO);
+        flow = QSerialPort::NoFlowControl;
+    }
 }
 
 QSerialPort::SerialPortError QSerialPortPrivate::decodeSystemError() const
@@ -1003,7 +1007,7 @@ bool QSerialPortPrivate::waitAnyEvent(int msecs, bool *timedOut,
     return true;
 }
 
-static const QLatin1String defaultPathPrefix("\\\\.\\");
+static const QString defaultPathPrefix = QStringLiteral("\\\\.\\");
 
 QString QSerialPortPrivate::portNameToSystemLocation(const QString &port)
 {
@@ -1098,7 +1102,8 @@ static const QList<qint32> standardBaudRatePairList()
 qint32 QSerialPortPrivate::baudRateFromSetting(qint32 setting)
 {
     const QList<qint32> baudRatePairs = standardBaudRatePairList();
-    const QList<qint32>::const_iterator baudRatePairListConstIterator = qFind(baudRatePairs, setting);
+    const QList<qint32>::const_iterator baudRatePairListConstIterator
+            = std::find(baudRatePairs.constBegin(), baudRatePairs.constEnd(), setting);
 
     return (baudRatePairListConstIterator != baudRatePairs.constEnd()) ? *baudRatePairListConstIterator : 0;
 }
@@ -1106,7 +1111,8 @@ qint32 QSerialPortPrivate::baudRateFromSetting(qint32 setting)
 qint32 QSerialPortPrivate::settingFromBaudRate(qint32 baudRate)
 {
     const QList<qint32> baudRatePairList = standardBaudRatePairList();
-    const QList<qint32>::const_iterator baudRatePairListConstIterator = qFind(baudRatePairList, baudRate);
+    const QList<qint32>::const_iterator baudRatePairListConstIterator
+            = std::find(baudRatePairList.constBegin(), baudRatePairList.constEnd(), baudRate);
 
     return (baudRatePairListConstIterator != baudRatePairList.constEnd()) ? *baudRatePairListConstIterator : 0;
 }

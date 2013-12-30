@@ -1,11 +1,9 @@
 /****************************************************************************
 **
-** Copyright (C) 2011-2012 Denis Shienkov <denis.shienkov@gmail.com>
-** Copyright (C) 2011 Sergey Belyashov <Sergey.Belyashov@gmail.com>
-** Copyright (C) 2012 Laszlo Papp <lpapp@kde.org>
+** Copyright (C) 2013 David Faure <faure+bluesystems@kde.org>
 ** Contact: http://www.qt-project.org/legal
 **
-** This file is part of the QtSerialPort module of the Qt Toolkit.
+** This file is part of the QtCore module of the Qt Toolkit.
 **
 ** $QT_BEGIN_LICENSE:LGPL$
 ** Commercial License Usage
@@ -41,44 +39,49 @@
 **
 ****************************************************************************/
 
-#ifndef QSERIALPORT_P_H
-#define QSERIALPORT_P_H
+#ifndef QLOCKFILE_H
+#define QLOCKFILE_H
 
-#include "qserialport.h"
-
-#include <private/qringbuffer_p.h>
+#include <QtCore/qstring.h>
+#include <QtCore/qscopedpointer.h>
 
 QT_BEGIN_NAMESPACE
 
-class QSerialPortPrivateData
+class QLockFilePrivate;
+
+class Q_CORE_EXPORT QLockFile
 {
 public:
-    enum IoConstants {
-        ReadChunkSize = 512,
-        WriteChunkSize = 512
+    QLockFile(const QString &fileName);
+    ~QLockFile();
+
+    bool lock();
+    bool tryLock(int timeout = 0);
+    void unlock();
+
+    void setStaleLockTime(int);
+    int staleLockTime() const;
+
+    bool isLocked() const;
+    bool getLockInfo(qint64 *pid, QString *hostname, QString *appname) const;
+    bool removeStaleLockFile();
+
+    enum LockError {
+        NoError = 0,
+        LockFailedError = 1,
+        PermissionError = 2,
+        UnknownError = 3
     };
+    LockError error() const;
 
-    QSerialPortPrivateData(QSerialPort *q);
-    int timeoutValue(int msecs, int elapsed);
+protected:
+    QScopedPointer<QLockFilePrivate> d_ptr;
 
-    qint64 readBufferMaxSize;
-    QRingBuffer readBuffer;
-    QRingBuffer writeBuffer;
-    QSerialPort::SerialPortError error;
-    QString systemLocation;
-    qint32 inputBaudRate;
-    qint32 outputBaudRate;
-    QSerialPort::DataBits dataBits;
-    QSerialPort::Parity parity;
-    QSerialPort::StopBits stopBits;
-    QSerialPort::FlowControl flow;
-    QSerialPort::DataErrorPolicy policy;
-    bool dataTerminalReady;
-    bool requestToSend;
-    bool settingsRestoredOnClose;
-    QSerialPort * const q_ptr;
+private:
+    Q_DECLARE_PRIVATE(QLockFile)
+    Q_DISABLE_COPY(QLockFile)
 };
 
 QT_END_NAMESPACE
 
-#endif // QSERIALPORT_P_H
+#endif // QLOCKFILE_H

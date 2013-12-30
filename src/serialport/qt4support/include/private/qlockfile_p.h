@@ -1,11 +1,9 @@
 /****************************************************************************
 **
-** Copyright (C) 2011-2012 Denis Shienkov <denis.shienkov@gmail.com>
-** Copyright (C) 2011 Sergey Belyashov <Sergey.Belyashov@gmail.com>
-** Copyright (C) 2012 Laszlo Papp <lpapp@kde.org>
+** Copyright (C) 2013 David Faure <faure+bluesystems@kde.org>
 ** Contact: http://www.qt-project.org/legal
 **
-** This file is part of the QtSerialPort module of the Qt Toolkit.
+** This file is part of the QtCore module of the Qt Toolkit.
 **
 ** $QT_BEGIN_LICENSE:LGPL$
 ** Commercial License Usage
@@ -41,44 +39,66 @@
 **
 ****************************************************************************/
 
-#ifndef QSERIALPORT_P_H
-#define QSERIALPORT_P_H
+#ifndef QLOCKFILE_P_H
+#define QLOCKFILE_P_H
 
-#include "qserialport.h"
+//
+//  W A R N I N G
+//  -------------
+//
+// This file is not part of the Qt API.  It exists purely as an
+// implementation detail.  This header file may change from version to
+// version without notice, or even be removed.
+//
+// We mean it.
+//
 
-#include <private/qringbuffer_p.h>
+#include <QtCore/qlockfile.h>
+#include <QtCore/qfile.h>
+
+#ifdef Q_OS_WIN
+#include <qt_windows.h>
+#endif
 
 QT_BEGIN_NAMESPACE
 
-class QSerialPortPrivateData
+class QLockFilePrivate
 {
 public:
-    enum IoConstants {
-        ReadChunkSize = 512,
-        WriteChunkSize = 512
-    };
+    QLockFilePrivate(const QString &fn)
+        : fileName(fn),
+#ifdef Q_OS_WIN
+          fileHandle(INVALID_HANDLE_VALUE),
+#else
+          fileHandle(-1),
+#endif
+          staleLockTime(30 * 1000), // 30 seconds
+          lockError(QLockFile::NoError),
+          isLocked(false)
+    {
+    }
+    QLockFile::LockError tryLock_sys();
+    bool removeStaleLock();
+    bool getLockInfo(qint64 *pid, QString *hostname, QString *appname) const;
+    // Returns \c true if the lock belongs to dead PID, or is old.
+    // The attempt to delete it will tell us if it was really stale or not, though.
+    bool isApparentlyStale() const;
 
-    QSerialPortPrivateData(QSerialPort *q);
-    int timeoutValue(int msecs, int elapsed);
+#ifdef Q_OS_UNIX
+    static int checkFcntlWorksAfterFlock();
+#endif
 
-    qint64 readBufferMaxSize;
-    QRingBuffer readBuffer;
-    QRingBuffer writeBuffer;
-    QSerialPort::SerialPortError error;
-    QString systemLocation;
-    qint32 inputBaudRate;
-    qint32 outputBaudRate;
-    QSerialPort::DataBits dataBits;
-    QSerialPort::Parity parity;
-    QSerialPort::StopBits stopBits;
-    QSerialPort::FlowControl flow;
-    QSerialPort::DataErrorPolicy policy;
-    bool dataTerminalReady;
-    bool requestToSend;
-    bool settingsRestoredOnClose;
-    QSerialPort * const q_ptr;
+    QString fileName;
+#ifdef Q_OS_WIN
+    Qt::HANDLE fileHandle;
+#else
+    int fileHandle;
+#endif
+    int staleLockTime; // "int milliseconds" is big enough for 24 days
+    QLockFile::LockError lockError;
+    bool isLocked;
 };
 
 QT_END_NAMESPACE
 
-#endif // QSERIALPORT_P_H
+#endif /* QLOCKFILE_P_H */

@@ -1,8 +1,6 @@
 /****************************************************************************
 **
-** Copyright (C) 2011-2012 Denis Shienkov <denis.shienkov@gmail.com>
-** Copyright (C) 2011 Sergey Belyashov <Sergey.Belyashov@gmail.com>
-** Copyright (C) 2012 Laszlo Papp <lpapp@kde.org>
+** Copyright (C) 2013 Laszlo Papp <lpapp@kde.org>
 ** Contact: http://www.qt-project.org/legal
 **
 ** This file is part of the QtSerialPort module of the Qt Toolkit.
@@ -41,44 +39,43 @@
 **
 ****************************************************************************/
 
-#ifndef QSERIALPORT_P_H
-#define QSERIALPORT_P_H
+#ifndef SERIALPORTWRITER_H
+#define SERIALPORTWRITER_H
 
-#include "qserialport.h"
+#include <QtSerialPort/QSerialPort>
 
-#include <private/qringbuffer_p.h>
+#include <QTextStream>
+#include <QTimer>
+#include <QByteArray>
+#include <QObject>
+
+QT_USE_NAMESPACE
 
 QT_BEGIN_NAMESPACE
 
-class QSerialPortPrivateData
-{
-public:
-    enum IoConstants {
-        ReadChunkSize = 512,
-        WriteChunkSize = 512
-    };
-
-    QSerialPortPrivateData(QSerialPort *q);
-    int timeoutValue(int msecs, int elapsed);
-
-    qint64 readBufferMaxSize;
-    QRingBuffer readBuffer;
-    QRingBuffer writeBuffer;
-    QSerialPort::SerialPortError error;
-    QString systemLocation;
-    qint32 inputBaudRate;
-    qint32 outputBaudRate;
-    QSerialPort::DataBits dataBits;
-    QSerialPort::Parity parity;
-    QSerialPort::StopBits stopBits;
-    QSerialPort::FlowControl flow;
-    QSerialPort::DataErrorPolicy policy;
-    bool dataTerminalReady;
-    bool requestToSend;
-    bool settingsRestoredOnClose;
-    QSerialPort * const q_ptr;
-};
-
 QT_END_NAMESPACE
 
-#endif // QSERIALPORT_P_H
+class SerialPortWriter : public QObject
+{
+    Q_OBJECT
+
+public:
+    SerialPortWriter(QSerialPort *serialPort, QObject *parent = 0);
+    ~SerialPortWriter();
+
+    void write(const QByteArray &writeData);
+
+private slots:
+    void handleBytesWritten(qint64 bytes);
+    void handleTimeout();
+    void handleError(QSerialPort::SerialPortError error);
+
+private:
+    QSerialPort     *m_serialPort;
+    QByteArray      m_writeData;
+    QTextStream     m_standardOutput;
+    qint64          m_bytesWritten;
+    QTimer          m_timer;
+};
+
+#endif
